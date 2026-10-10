@@ -1,0 +1,427 @@
+const http = require("http");
+const websocketServer = require("websocket").server;
+
+const MAX_PLAYERS = 2; // Change to 4 when ready for full multiplayer
+
+const httpServer = http.createServer();
+
+httpServer.listen(process.env.PORT, process.env.IP, () => {
+    console.log(
+        `WebSocket Server running on ${process.env.IP}:${process.env.PORT}`
+    );
+});
+
+const clients = {};
+const games = {};
+
+// --- MASTER QUESTION DATABASE (SERVER-SIDE ONLY) ---
+const allQuestions = {
+    'j_lion1': { question: "A group of lions living together is known by what specific name?", answer: "pride" },
+    'j_lion2': { question: "On which continent would you find the majority of wild lions living today?", answer: "africa" },
+    'j_lion3': { question: "True or False: In a lion pride, the male lion is responsible for doing most of the hunting.", answer: "false" },
+    'j_rhino1': { question: "A rhinoceros's horn is not made of bone, but actually consists of what protein?", answer: "keratin" },
+    'j_rhino2': { question: "When a group of rhinoceroses gathers together, what is that group called?", answer: "crash" },
+    'j_rhino3': { question: "Are rhinoceroses classified as herbivores (plant-eaters) or carnivores (meat-eaters)?", answer: "herbivores" },
+    'j_cheetah1': { question: "True or False: The cheetah is officially recognized as the fastest land animal in the world.", answer: "true" },
+    'j_cheetah2': { question: "While many big cats can roar, is the cheetah physically capable of roaring?", answer: "no" },
+    'j_cheetah3': { question: "Do cheetahs typically hunt for their prey during the bright daylight or at night?", answer: "day" },
+    'j_elephant1': { question: "In the animal kingdom, what is the specific term for a baby elephant?", answer: "calf" },
+    'j_elephant2': { question: "Between the African elephant and the Asian elephant, which species is generally larger?", answer: "african" },
+    'j_elephant3': { question: "An elephant's long tusks are actually a highly developed version of which type of teeth?", answer: "teeth" },
+    'j_tiger1': { question: "Which specific subspecies is recognized as the largest of all living tigers?", answer: "siberian" },
+    'j_tiger2': { question: "Unlike most domestic cats, tigers are famous for enjoying what aquatic activity?", answer: "swimming" },
+    'j_tiger3': { question: "The unique markings on a tiger's coat used for camouflage are called what?", answer: "stripes" },
+    'j_leopard1': { question: "Are the spots on a leopard's fur shaped like solid dots or hollow rings called rosettes?", answer: "rosettes" },
+    'j_leopard2': { question: "Leopards are famous for their strength; are they known for their ability to climb trees?", answer: "yes" },
+    'j_leopard3': { question: "What is the common name for a leopard that has a rare, entirely black coat?", answer: "panther" },
+    'j_jaguar1': { question: "On which continent are jaguars naturally found in the wild?", answer: "america" },
+    'j_jaguar2': { question: "Do the rosettes (spots) on a jaguar's fur usually have smaller spots inside them?", answer: "yes" },
+    'j_jaguar3': { question: "Jaguars possess one of the most powerful versions of what in the entire animal kingdom?", answer: "bites" },
+    'j_buffalo1': { question: "On which continent is the Cape Buffalo primarily found wandering the savannahs?", answer: "africa" },
+    'j_buffalo2': { question: "True or False: The Cape Buffalo is often nicknamed 'The Black Death' due to its dangerous nature.", answer: "true" },
+    'j_buffalo3': { question: "What is the collective noun used to describe a large group of buffalo?", answer: "herd" },
+    'j_oryx1': { question: "The Oryx antelope is specially adapted to survive in what kind of hot, dry biome?", answer: "desert" },
+    'j_oryx2': { question: "Can both the male and female Oryx grow the long, straight horns the species is known for?", answer: "yes" },
+    'j_oryx3': { question: "How does the Oryx manage to survive in the desert with very little access to water?", answer: "eating plants" },
+    'j_deer1': { question: "What are the large, bony structures that grow from the head of a male deer called?", answer: "antlers" },
+    'j_deer2': { question: "Do deer go through a cycle where they shed and regrow their antlers every year?", answer: "yes" },
+    'j_deer3': { question: "What is the specific name for a young deer, often known for having white spots?", answer: "fawn" },
+    'j_snake1': { question: "Is the vibrant Green Tree Python considered a venomous species of snake?", answer: "no" },
+    'j_snake2': { question: "Since they lack venom, what method do pythons use to kill their prey?", answer: "constriction" },
+    'j_snake3': { question: "On which large tropical island are Green Tree Pythons most commonly found?", answer: "new guinea" },
+    'j_turtle1': { question: "While many turtles live in water, do tortoises typically live on land or in the ocean?", answer: "land" },
+    'j_turtle2': { question: "What is the scientific name for the hard, domed upper part of a tortoise's shell?", answer: "carapace" },
+    'j_turtle3': { question: "Tortoises are world-famous for being able to reach a very advanced what?", answer: "lifespan" },
+    'j_ostrich1': { question: "The ostrich holds the record for being the world's largest species of what?", answer: "bird" },
+    'j_ostrich2': { question: "Despite having large wings, is a fully grown ostrich physically able to fly?", answer: "no" },
+    'j_ostrich3': { question: "Which animal is faster at sprinting: a running ostrich or a galloping horse?", answer: "ostrich" },
+    'j_gorilla1': { question: "A social group of gorillas living together is referred to by what name?", answer: "troop" },
+    'j_gorilla2': { question: "What is the name for the dominant, older male leader of a gorilla troop?", answer: "silverback" },
+    'j_gorilla3': { question: "Are gorillas primarily herbivores that eat plants, or carnivores that eat meat?", answer: "herbivores" },
+    'j_eagle1': { question: "The Bald Eagle is recognized as the national bird and symbol of which country?", answer: "usa" },
+    'j_eagle2': { question: "Is the Bald Eagle actually bald, or does it just have white feathers on its head?", answer: "no" },
+    'j_eagle3': { question: "What is the primary food source that Bald Eagles hunt for in lakes and rivers?", answer: "fish" },
+    'j_chimp1': { question: "Are chimpanzees scientifically classified as being part of the 'Great Apes' family?", answer: "yes" },
+    'j_chimp2': { question: "Are chimpanzees known for their high intelligence and ability to use tools in the wild?", answer: "yes" },
+    'j_chimp3': { question: "Do chimpanzees prefer to live as solitary animals or in large social groups?", answer: "yes" },
+    'j_lemur1': { question: "To which specific island nation are all species of lemurs native?", answer: "madagascar" },
+    'j_lemur2': { question: "What is the most recognizable physical feature of the Ring-tailed Lemur?", answer: "tail" },
+    'j_lemur3': { question: "While they are primates, is a lemur technically considered a type of monkey?", answer: "no" },
+    'j_giraffe1': { question: "What is the name for the unique, skin-covered horns on a giraffe's head?", answer: "ossicones" },
+    'j_giraffe2': { question: "Standing up to 19 feet tall, the giraffe is the world's tallest what?", answer: "mammal" },
+    'j_giraffe3': { question: "True or False: A giraffe has the same number of neck bones (seven) as a human.", answer: "yes" },
+    'j_heron1': { question: "Do these long-legged birds typically hunt for food in large groups or alone?", answer: "alone" },
+    'j_heron2': { question: "In what type of wet environment are you most likely to spot a heron?", answer: "water" },
+    'j_heron3': { question: "What is the primary food source for most species of herons?", answer: "fish" },
+    'j_toucan1': { question: "Is the toucan's signature large, colorful bill very heavy or surprisingly lightweight?", answer: "lightweight" },
+    'j_toucan2': { question: "On which continent would you find the rainforests that toucans call home?", answer: "america" },
+    'j_toucan3': { question: "What type of food makes up the majority of a toucan's natural diet?", answer: "fruit" },
+    'j_macaw1': { question: "Are these large, colorful parrots known for their high levels of intelligence?", answer: "yes" },
+    'j_macaw2': { question: "Macaws are native to the tropical rainforests of which continent?", answer: "america" },
+    'j_macaw3': { question: "True or False: Some species of Macaw are capable of living for over 80 years.", answer: "true" },
+    'j_hippo1': { question: "Do hippopotamuses prefer to spend the majority of their day in the water or on land?", answer: "water" },
+    'j_hippo2': { question: "Is the hippopotamus more closely related to the pig or to the whale?", answer: "whale" },
+    'j_hippo3': { question: "What is the red liquid hippos secrete to protect their skin from the sun called?", answer: "blood sweat" },
+    'j_warthog1': { question: "What is the primary physical defense mechanism a warthog uses against predators?", answer: "tusks" },
+    'j_warthog2': { question: "The warthog is a wild member of which common domestic animal family?", answer: "pig" },
+    'j_warthog3': { question: "Do warthogs use their powerful tusks for digging up roots, fighting, or both?", answer: "both" },
+    'j_hyena1': { question: "Is a hyena scientifically more closely related to a cat or to a dog?", answer: "cat" },
+    'j_hyena2': { question: "What is the famous vocalization that the Spotted Hyena is known for making?", answer: "laugh" },
+    'j_hyena3': { question: "Does the Spotted Hyena have one of the strongest bite forces in the animal kingdom?", answer: "yes" },
+    'j_crocodile1': { question: "Do crocodiles have a pointed V-shaped snout or a rounded U-shaped snout?", answer: "v-shaped" },
+    'j_crocodile2': { question: "While they are excellent swimmers, can crocodiles actually breathe while underwater?", answer: "no" },
+    'j_crocodile3': { question: "True or False: The American Alligator can be identified by its rounded U-shaped snout.", answer: "true" },
+    'j_komodo1': { question: "The Komodo Dragon holds the title of being the world's largest species of what?", answer: "lizard" },
+    'j_komodo2': { question: "To which Southeast Asian country is the Komodo Dragon native?", answer: "indonesia" },
+    'j_komodo3': { question: "Is it true that a Komodo Dragon can kill prey using a venomous bite?", answer: "yes" },
+    'j_camel1': { question: "Contrary to popular belief, what is actually stored inside a camel's hump?", answer: "fat" },
+    'j_camel2': { question: "What is the specific name for a camel that has only one single hump?", answer: "dromedary" },
+    'j_camel3': { question: "How many sets of eyelids does a camel have to protect its eyes from blowing sand?", answer: "three" },
+    'j_impala1': { question: "Are impalas known in the African savannah for their incredible jumping abilities?", answer: "yes" },
+    'j_impala2': { question: "What is the term for the high, zigzagging leaps impalas use to confuse predators?", answer: "stotting" },
+    'j_impala3': { question: "In the impala species, do the females typically grow horns like the males?", answer: "no" },
+    'j_python1': { question: "How do pythons kill their prey?", answer: "constriction" },
+    'j_python2': { question: "Are pythons found in the Americas?", answer: "no" },
+    'j_python3': { question: "Which is the longest species of python?", answer: "reticulated" },
+    'j_peacock1': { question: "Are the famous colorful tail feathers found on the male peacock or the female peahen?", answer: "male" },
+    'j_peacock2': { question: "What is the technical term for the long, elaborate tail display of a male peacock?", answer: "train" },
+    'j_peacock3': { question: "The peacock is recognized as the national bird of which country?", answer: "india" },
+
+    'c_moscow1': { question: "The iconic St. Basil's Cathedral is located in which famous Moscow square?", answer: "red square" },
+    'c_moscow2': { question: "St. Basil's Cathedral is the most famous landmark of which Russian city?", answer: "moscow" },
+    'c_moscow3': { question: "Were the architects of St. Basil's rumored to have been blinded to prevent them from building anything else as beautiful?", answer: "yes" },
+    'c_giza1': { question: "The Great Pyramid of Giza was originally built as a massive tomb for which pharaoh?", answer: "khufu" },
+    'c_giza2': { question: "The Great Sphinx features the head of a human and the body of which powerful animal?", answer: "lion" },
+    'c_giza3': { question: "In which modern-day country are the ancient Pyramids of Giza located?", answer: "egypt" },
+    'c_sydney1': { question: "The world-famous Sydney Opera House is located in which country?", answer: "australia" },
+    'c_sydney2': { question: "True or False: The unique roof of the Sydney Opera House is made of shell-like structures.", answer: "true" },
+    'c_sydney3': { question: "Which major international sporting event was hosted by the city of Sydney in the year 2000?", answer: "olympics" },
+    'c_rome1': { question: "In which historic Italian city would you find the ancient Colosseum amphitheater?", answer: "rome" },
+    'c_rome2': { question: "What type of ancient combatants famously fought for public entertainment in the Colosseum?", answer: "gladiators" },
+    'c_rome3': { question: "Is it true that the Colosseum was once flooded to stage mock sea battles?", answer: "yes" },
+    'c_petra1': { question: "In which Middle Eastern country is the ancient 'Rose City' of Petra located?", answer: "jordan" },
+    'c_petra2': { question: "What is the name of Petra's most famous building, often seen in the Indiana Jones movies?", answer: "treasury" },
+    'c_petra3': { question: "The city of Petra is famous because its buildings are carved directly into what color of sandstone?", answer: "rose" },
+    'c_hollywood1': { question: "In which U.S. state would you find the world-famous Hollywood sign?", answer: "california" },
+    'c_hollywood2': { question: "The Hollywood sign overlooks which major city in the United States?", answer: "los angeles" },
+    'c_hollywood3': { question: "When it was first built in 1923, did the sign originally say 'Hollywood' or 'Hollywoodland'?", answer: "hollywoodland" },
+    'c_pisa1': { question: "In which European country is the famous Leaning Tower located?", answer: "italy" },
+    'c_pisa2': { question: "The Leaning Tower serves as the bell tower for the cathedral of which Italian city?", answer: "pisa" },
+    'c_pisa3': { question: "Did the tower's famous lean begin while it was still being constructed?", answer: "yes" },
+    'c_paris1': { question: "The Eiffel Tower is the most famous landmark in which European country?", answer: "france" },
+    'c_paris2': { question: "What is the romantic nickname given to Paris, the city where the Eiffel Tower stands?", answer: "city of light" },
+    'c_paris3': { question: "Was the Eiffel Tower originally intended to be a permanent structure or a temporary one?", answer: "yes" },
+    'c_washington1': { question: "The White House is the official residence and workplace of the president of which country?", answer: "usa" },
+    'c_washington2': { question: "In which U.S. capital city is the White House located?", answer: "washington dc" },
+    'c_washington3': { question: "The president's famous 'Oval Office' is located in which wing of the White House?", answer: "west wing" },
+    'c_brussels1': { question: "In which Belgian city was the Atomium monument built for the 1958 World's Fair?", answer: "brussels" },
+    'c_brussels2': { question: "The unique shape of the Atomium represents a unit cell of what kind of crystal?", answer: "iron crystal" },
+    'c_brussels3': { question: "How many large spheres make up the total structure of the Atomium?", answer: "9" },
+    'c_rushmore1': { question: "In which U.S. state is the Mount Rushmore National Memorial located?", answer: "south dakota" },
+    'c_rushmore2': { question: "Can you name one of the four U.S. presidents whose faces are carved into Mount Rushmore?", answer: "lincoln" },
+    'c_rushmore3': { question: "Is the sculpture at Mount Rushmore considered complete according to the original design?", answer: "no" },
+    'c_toronto1': { question: "The CN Tower is a signature icon of the skyline of which Canadian city?", answer: "toronto" },
+    'c_toronto2': { question: "Was the CN Tower the world's tallest free-standing structure when it was completed in 1976?", answer: "yes" },
+    'c_toronto3': { question: "What did the initials 'CN' originally stand for in the name of the tower?", answer: "canadian national" },
+    'c_tajmahal1': { question: "In which country is the breathtaking Taj Mahal mausoleum located?", answer: "india" },
+    'c_tajmahal2': { question: "What type of precious white stone was primarily used to build the Taj Mahal?", answer: "marble" },
+    'c_tajmahal3': { question: "The Taj Mahal was built by an emperor as a grand memorial for his late what?", answer: "wife" },
+    'c_wall1': { question: "In which country can you find the ancient military fortification known as the Great Wall?", answer: "china" },
+    'c_wall2': { question: "Was the Great Wall built to protect the empire from invaders from the north or the south?", answer: "north" },
+    'c_wall3': { question: "True or False: The Great Wall of China is clearly visible from the Moon with the naked eye.", answer: "false" },
+    'c_beijing1': { question: "In which major Chinese city is the historic Forbidden City palace complex located?", answer: "beijing" },
+    'c_beijing2': { question: "The Forbidden City served as the imperial palace for which two famous Chinese dynasties?", answer: "ming and qing" },
+    'c_beijing3': { question: "Has the Forbidden City now been converted into a public museum for all to visit?", answer: "yes" },
+    'c_seattle1': { question: "The futuristic Space Needle landmark is located in which U.S. city?", answer: "seattle" },
+    'c_seattle2': { question: "The Space Needle was originally built as a centerpiece for which 1962 event?", answer: "world's fair" },
+    'c_seattle3': { question: "Does the Space Needle feature a famous rotating restaurant at the top of the tower?", answer: "yes" },
+    'c_dubai1': { question: "The luxurious Burj Al Arab hotel is located in which city of the United Arab Emirates?", answer: "dubai" },
+    'c_dubai2': { question: "The unique architecture of the Burj Al Arab is designed to mimic the sail of what?", answer: "sail" },
+    'c_dubai3': { question: "True or False: The Burj Al Arab is recognized as one of the tallest hotels in the world.", answer: "true" },
+    'c_acropolis1': { question: "In which ancient Greek city is the citadel known as the Acropolis located?", answer: "athens" },
+    'c_acropolis2': { question: "What is the name of the famous ancient temple that stands at the center of the Acropolis?", answer: "parthenon" },
+    'c_acropolis3': { question: "To which ancient Greek goddess was the Parthenon temple dedicated?", answer: "athena" },
+    'c_london1': { question: "In which capital city of the United Kingdom is the historic Tower Bridge located?", answer: "london" },
+    'c_london2': { question: "What is the name of the famous river that the Tower Bridge crosses?", answer: "thames" },
+    'c_london3': { question: "Is the Tower Bridge a combination of both a suspension bridge and a drawbridge?", answer: "yes" },
+    'c_brandenburg1': { question: "The Brandenburg Gate is a 18th-century neoclassical monument in which German city?", answer: "berlin" },
+    'c_brandenburg2': { question: "The gate once marked the beginning of the road leading from Berlin to which other city?", answer: "brandenburg" },
+    'c_brandenburg3': { question: "What is the name of the statue on top of the gate showing a chariot pulled by four horses?", answer: "quadriga" },
+    'c_machu1': { question: "In which South American country would you find the ancient Incan citadel of Machu Picchu?", answer: "peru" },
+    'c_machu2': { question: "Machu Picchu is situated high up within which major mountain range?", answer: "andes" },
+    'c_machu3': { question: "Which ancient civilization is responsible for building the city of Machu Picchu?", answer: "inca" },
+    'c_liberty1': { question: "In the harbor of which major U.S. city is the Statue of Liberty located?", answer: "new york" },
+    'c_liberty2': { question: "The Statue of Liberty was originally a gift to the United States from which European country?", answer: "france" },
+    'c_liberty3': { question: "What symbolic object is the Statue of Liberty holding high in her right hand?", answer: "torch" },
+    'c_rio1': { question: "The massive Christ the Redeemer statue overlooks which famous Brazilian city?", answer: "rio de janeiro" },
+    'c_rio2': { question: "On top of which specific mountain in Rio does the Christ the Redeemer statue stand?", answer: "corcovado" },
+    'c_rio3': { question: "Is Christ the Redeemer considered one of the 'New Seven Wonders of the World'?", answer: "yes" },
+};
+
+const questionPositions = {
+    1: { jungle: ['j_lion1', 'j_lion2', 'j_lion3'], city: ['c_moscow1', 'c_moscow2', 'c_moscow3'] },
+    2: { jungle: ['j_rhino1', 'j_rhino2', 'j_rhino3'], city: ['c_giza1', 'c_giza2', 'c_giza3'] },
+    3: { jungle: ['j_cheetah1', 'j_cheetah2', 'j_cheetah3'], city: ['c_sydney1', 'c_sydney2', 'c_sydney3'] },
+    4: { jungle: ['j_elephant1', 'j_elephant2', 'j_elephant3'], city: ['c_rome1', 'c_rome2', 'c_rome3'] },
+    5: { jungle: ['j_tiger1', 'j_tiger2', 'j_tiger3'], city: ['c_petra1', 'c_petra2', 'c_petra3'] },
+    6: { jungle: ['j_leopard1', 'j_leopard2', 'j_leopard3'], city: ['c_hollywood1', 'c_hollywood2', 'c_hollywood3'] },
+    7: { jungle: ['j_buffalo1', 'j_buffalo2', 'j_buffalo3'], city: ['c_pisa1', 'c_pisa2', 'c_pisa3'] },
+    8: { jungle: ['j_snake1', 'j_snake2', 'j_snake3'], city: ['c_paris1', 'c_paris2', 'c_paris3'] },
+    9: { jungle: ['j_turtle1', 'j_turtle2', 'j_turtle3'], city: ['c_washington1', 'c_washington2', 'c_washington3'] },
+    10: { jungle: ['j_ostrich1', 'j_ostrich2', 'j_ostrich3'], city: ['c_brussels1', 'c_brussels2', 'c_brussels3'] },
+    11: { jungle: ['j_macaw1', 'j_macaw2', 'j_macaw3'], city: ['c_rushmore1', 'c_rushmore2', 'c_rushmore3'] },
+    12: { jungle: ['j_crocodile1', 'j_crocodile2', 'j_crocodile3'], city: ['c_toronto1', 'c_toronto2', 'c_toronto3'] },
+    13: { jungle: ['j_giraffe1', 'j_giraffe2', 'j_giraffe3'], city: ['c_tajmahal1', 'c_tajmahal2', 'c_tajmahal3'] },
+    14: { jungle: ['j_jaguar1', 'j_jaguar2', 'j_jaguar3'], city: ['c_wall1', 'c_wall2', 'c_wall3'] },
+    15: { jungle: ['j_hyena1', 'j_hyena2', 'j_hyena3'], city: ['c_beijing1', 'c_beijing2', 'c_beijing3'] },
+    16: { jungle: ['j_warthog1', 'j_warthog2', 'j_warthog3'], city: ['c_seattle1', 'c_seattle2', 'c_seattle3'] },
+    17: { jungle: ['j_komodo1', 'j_komodo2', 'j_komodo3'], city: ['c_dubai1', 'c_dubai2', 'c_dubai3'] },
+    18: { jungle: ['j_oryx1', 'j_oryx2', 'j_oryx3'], city: ['c_acropolis1', 'c_acropolis2', 'c_acropolis3'] },
+    19: { jungle: ['j_gorilla1', 'j_gorilla2', 'j_gorilla3'], city: ['c_london1', 'c_london2', 'c_london3'] },
+    20: { jungle: ['j_eagle1', 'j_eagle2', 'j_eagle3'], city: ['c_brandenburg1', 'c_brandenburg2', 'c_brandenburg3'] },
+    21: { jungle: ['j_chimp1', 'j_chimp2', 'j_chimp3'], city: ['c_machu1', 'c_machu2', 'c_machu3'] },
+    22: { jungle: ['j_heron1', 'j_heron2', 'j_heron3'], city: ['c_liberty1', 'c_liberty2', 'c_liberty3'] },
+    23: { jungle: ['j_deer1', 'j_deer2', 'j_deer3'], city: ['c_rio1', 'c_rio2', 'c_rio3'] },
+    24: { jungle: ['j_camel1', 'j_camel2', 'j_camel3'], city: ['c_sydney1', 'c_sydney2', 'c_sydney3'] },
+    25: { jungle: ['j_impala1', 'j_impala2', 'j_impala3'], city: ['c_petra1', 'c_petra2', 'c_petra3'] },
+    26: { jungle: ['j_python1', 'j_python2', 'j_python3'], city: ['c_hollywood1', 'c_hollywood2', 'c_hollywood3'] },
+    27: { jungle: ['j_peacock1', 'j_peacock2', 'j_peacock3'], city: ['c_pisa1', 'c_pisa2', 'c_pisa3'] },
+    28: { jungle: ['j_toucan1', 'j_toucan2', 'j_toucan3'], city: ['c_paris1', 'c_paris2', 'c_paris3'] },
+    29: { jungle: ['j_hippo1', 'j_hippo2', 'j_hippo3'], city: ['c_washington1', 'c_washington2', 'c_washington3'] },
+    30: { jungle: ['j_lion1', 'j_lion2', 'j_lion3'], city: ['c_brussels1', 'c_brussels2', 'c_brussels3'] },
+    31: { jungle: ['j_rhino1', 'j_rhino2', 'j_rhino3'], city: ['c_rushmore1', 'c_rushmore2', 'c_rushmore3'] },
+    32: { jungle: ['j_cheetah1', 'j_cheetah2', 'j_cheetah3'], city: ['c_toronto1', 'c_toronto2', 'c_toronto3'] },
+    33: { jungle: ['j_elephant1', 'j_elephant2', 'j_elephant3'], city: ['c_tajmahal1', 'c_tajmahal2', 'c_tajmahal3'] },
+    34: { jungle: ['j_tiger1', 'j_tiger2', 'j_tiger3'], city: ['c_wall1', 'c_wall2', 'c_wall3'] },
+};
+
+// =============================================
+// WEBSOCKET SERVER
+// =============================================
+const wsServer = new websocketServer({ "httpServer": httpServer });
+
+wsServer.on("request", request => {
+    const connection = request.accept(null, request.origin);
+    const clientId = guid();
+    clients[clientId] = { "connection": connection };
+
+    console.log(`[CONNECT] clientId=${clientId}`);
+    connection.send(JSON.stringify({ "method": "connect", "clientId": clientId }));
+
+    connection.on("message", message => {
+        const result = JSON.parse(message.utf8Data);
+        console.log(`[IN] clientId=${clientId} method=${result.method}`);
+
+        // =============================================
+        // QUIT — broadcast to all players then cleanup
+        // =============================================
+        if (result.method === "quit") {
+            const game = games[result.gameId];
+            if (game) {
+                console.log(`[QUIT] clientId=${clientId} gameId=${result.gameId}`);
+                const quitPayload = {
+                    method: "player_quit",
+                    message: "A player has left the game."
+                };
+                game.clients.forEach(client => {
+                    if (clients[client.clientId]) {
+                        console.log(`[OUT] player_quit -> ${client.clientId}`);
+                        clients[client.clientId].connection.send(
+                            JSON.stringify(quitPayload)
+                        );
+                    }
+                });
+                delete games[result.gameId];
+            }
+            return; // Stop processing other methods
+        }
+
+        // =============================================
+        // MATCHMAKING
+        // =============================================
+        if (result.method === "find_game") {
+            const gameType = result.gameType;
+            let targetGame = Object.values(games).find(
+                g => g.gameType === gameType &&
+                    g.clients.length < MAX_PLAYERS &&
+                    !g.started
+            );
+
+            if (!targetGame) {
+                const gameId = guid();
+                games[gameId] = {
+                    id: gameId,
+                    gameType: gameType,
+                    clients: [],
+                    state: {},
+                    started: false,
+                    turnIndex: 0,
+                    maxPlayers: MAX_PLAYERS
+                };
+                targetGame = games[gameId];
+                console.log(`[NEW GAME] gameId=${gameId} type=${gameType}`);
+            }
+
+            const player = ["p1", "p2", "p3", "p4"][targetGame.clients.length];
+            targetGame.clients.push({ clientId: result.clientId, player: player });
+            console.log(`[JOIN] clientId=${result.clientId} player=${player} gameId=${targetGame.id}`);
+
+            // Broadcast waiting count to all players in lobby
+            const waitPayload = {
+                method: "waiting",
+                count: targetGame.clients.length,
+                max: MAX_PLAYERS
+            };
+            targetGame.clients.forEach(c =>
+                clients[c.clientId].connection.send(JSON.stringify(waitPayload))
+            );
+
+            // Start when full
+            if (targetGame.clients.length === MAX_PLAYERS) {
+                targetGame.started = true;
+                console.log(`[START] gameId=${targetGame.id}`);
+                const startPayload = { method: "join", game: targetGame };
+                targetGame.clients.forEach(c => {
+                    console.log(`[OUT] join -> ${c.clientId}`);
+                    clients[c.clientId].connection.send(JSON.stringify(startPayload));
+                });
+            }
+        }
+
+        // =============================================
+        // MOVEMENT
+        // =============================================
+        if (result.method === "play") {
+            const game = games[result.gameId];
+            if (game) {
+                game.state[result.player] = {
+                    positionleft: result.positionleft,
+                    positiontop: result.positiontop
+                };
+                console.log(`[MOVE] player=${result.player} left=${result.positionleft} top=${result.positiontop}`);
+            }
+        }
+
+        // =============================================
+        // END TURN
+        // =============================================
+        if (result.method === "finish_turn") {
+            const game = games[result.gameId];
+            if (game) {
+                game.turnIndex = (game.turnIndex + 1) % game.clients.length;
+                console.log(`[TURN] gameId=${result.gameId} nextTurn=${game.turnIndex}`);
+            }
+        }
+
+        // =============================================
+        // QUESTIONS (server-side — answer never sent to client)
+        // =============================================
+        if (result.method === "request_questions") {
+            const pos = questionPositions[result.tile];
+            const qIds = pos ? (pos[result.mapType] || []) : [];
+            const questionData = qIds
+                .filter(id => allQuestions[id])
+                .map(id => ({ id: id, text: allQuestions[id].question }));
+            console.log(`[QUESTIONS] tile=${result.tile} type=${result.mapType} count=${questionData.length}`);
+            clients[result.clientId].connection.send(JSON.stringify({
+                method: "provide_questions",
+                questions: questionData
+            }));
+        }
+
+        // =============================================
+        // ANSWER VERIFICATION (correct answer never exposed)
+        // =============================================
+        if (result.method === "verify_answer") {
+            const qData = allQuestions[result.questionId];
+            if (!qData) {
+                console.log(`[VERIFY] ERROR: unknown questionId=${result.questionId}`);
+                return;
+            }
+            const isCorrect = result.answer.trim().toLowerCase() ===
+                qData.answer.toLowerCase();
+            console.log(`[VERIFY] questionId=${result.questionId} answer="${result.answer}" correct=${isCorrect}`);
+            clients[result.clientId].connection.send(JSON.stringify({
+                method: "verification_result",
+                isCorrect: isCorrect,
+                correctAnswer: qData.answer
+            }));
+        }
+    });
+
+    // Handle disconnection
+    connection.on("close", () => {
+        console.log(`[DISCONNECT] clientId=${clientId}`);
+        // Find and clean up any game this client was in
+        for (const gameId in games) {
+            const game = games[gameId];
+            const inGame = game.clients.find(c => c.clientId === clientId);
+            if (inGame) {
+                console.log(`[CLEANUP] Removing game ${gameId} due to disconnect`);
+                const quitPayload = {
+                    method: "player_quit",
+                    message: "A player disconnected."
+                };
+                game.clients.forEach(c => {
+                    if (c.clientId !== clientId && clients[c.clientId]) {
+                        clients[c.clientId].connection.send(JSON.stringify(quitPayload));
+                    }
+                });
+                delete games[gameId];
+                break;
+            }
+        }
+        delete clients[clientId];
+    });
+});
+
+// =============================================
+// GAME STATE BROADCAST LOOP (every 500ms)
+// =============================================
+function updateGameState() {
+    for (const gId in games) {
+        const game = games[gId];
+        if (game.started && game.clients.length > 0) {
+            const payload = JSON.stringify({ method: "update", game: game });
+            game.clients.forEach(c => {
+                if (clients[c.clientId]) {
+                    clients[c.clientId].connection.send(payload);
+                }
+            });
+        }
+    }
+    setTimeout(updateGameState, 500);
+}
+updateGameState();
+
+// =============================================
+// HELPERS
+// =============================================
+function S4() {
+    return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
+}
+const guid = () => (
+    S4() + S4() + "-" + S4() + "-4" +
+    S4().substr(0, 3) + "-" + S4() + "-" +
+    S4() + S4() + S4()
+).toLowerCase();
